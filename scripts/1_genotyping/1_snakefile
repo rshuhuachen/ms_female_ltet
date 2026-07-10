@@ -1,0 +1,101 @@
+'''
+snakemake --snakefile scripts/1_genotyping/1_snakefile --configfile scripts/1_genotyping/config.yaml \
+  --jobs 8 \
+  -p \
+  --default-resources mem_mb=10000 \
+  --use-conda \
+  --cluster '
+     sbatch \
+      --export ALL \
+      -n {threads} \
+      -e log/{name}.{jobid}.err \
+      -o log/{name}.{jobid}.out \
+      --mem={resources.mem_mb}' \
+      --jn align.{name}.{jobid}.sh 
+'''
+
+SAMPLES = ["R0001","R0002","R0003","R0004","R0005","R0006","R0007","R0008","R0009","R0010","R0011","R0012","R0013","R0014","R0015","R0016","R0017","R0018","R0019","R0020","R0021","R0022","R0023","R0024","R0025","R0026","R0027","R0028","R0029","R0030","R0031","R0032","R0033","R0034","R0035","R0036","R0037","R0038","R0039","R0040","R0041","R0042","R0043","R0044","R0045","R0046","R0047","R0048","R0049","R0050","R0051","R0052","R0053","R0054","R0055","R0056","R0057","R0058","R0059","R0060","R0061","R0062","R0063","R0064","R0065","R0066","R0067","R0068","R0069","R0070","R0071","R0072","R0073","R0074","R0075","R0076","R0077","R0078","R0079","R0080","R0081","R0082","R0083","R0084","R0085","R0086","R0087","R0088","R0089","R0090","R0091","R0092","R0093","R0094","R0095","R0096","R0097","R0098","R0099","R0100","R0101","R0102","R0103","R0104","R0105","R0106","R0107","R0108","R0109","R0110","R0111","R0112","R0113","R0114","R0115","R0116","R0117","R0118","R0119","R0120","R0121","R0122","R0123","R0124","R0125","R0126","R0127","R0128","R0129","R0130","R0131","R0132","R0133","R0134","R0135","R0136","R0137","R0138","R0139","R0140","R0141","R0142","R0143"]
+
+READ = ["1", "2"]
+
+
+rule all:
+    input:
+        expand("/vol/cluster-data/rchen/wgr/females/BMK250613-CQ027-ZX01-0101/BMK_DATA_20260330132240_1/Unknown_CQ027-001{sample}_good_{read}.fq.gz", sample=SAMPLES, read=READ),
+        expand("/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.sam", sample=SAMPLES),
+        expand("/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.sorted.bam.bai", sample=SAMPLES),
+        expand("/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.bam", sample=SAMPLES)
+
+
+rule alignment:
+    input:
+        readforward="/vol/cluster-data/rchen/wgr/females/BMK250613-CQ027-ZX01-0101/BMK_DATA_20260330132240_1/Unknown_CQ027-001{sample}_good_1.fq.gz",
+        readbackward="/vol/cluster-data/rchen/wgr/females/BMK250613-CQ027-ZX01-0101/BMK_DATA_20260330132240_1/Unknown_CQ027-001{sample}_good_2.fq.gz"
+    output:
+        samfile=temp("/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.sam")
+    params:
+        refgen="/vol/cluster-data/rchen/annotation/PO2979_Lyrurus_tetrix_black_grouse.RepeatMasked.fasta"
+    threads: 12
+    log:
+        "log/alignment_{sample}.log"
+    shell:
+        """
+        /vol/biotools/bin/bwa mem -t {threads} {params.refgen} {input.readforward} {input.readbackward} 2> {log} > {output.samfile}
+        """
+
+
+rule sam_to_bam:
+    input:
+        samfile="/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.sam"
+    output:
+        bamfile=temp("/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.bam")
+    shell:
+        """
+        /vol/biotools/bin/samtools view -S -b {input.samfile} > {output.bamfile}
+        """
+
+
+rule sortbam:
+    input:
+        bamfile=rules.sam_to_bam.output.bamfile
+    output:
+        sortedbamfile="/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.sorted.bam"
+    shell:
+        """
+        /vol/biotools/bin/samtools sort {input.bamfile} -o {output.sortedbamfile}
+        """
+
+
+rule stats_alignment:
+    input:
+        sortedbamfile=rules.sortbam.output.sortedbamfile
+    output:
+        stats="/vol/cluster-data/rchen/git/ms_female_ltet/output/stats_females.txt"
+    shell:
+        """
+        printf '\\n' >> {output.stats}
+        echo {input.sortedbamfile} >> {output.stats}
+        /vol/biotools/bin/samtools flagstat {input.sortedbamfile} >> {output.stats}
+        """
+
+
+rule index_bamfiles:
+    input:
+        sortedbamfile=rules.sortbam.output.sortedbamfile
+    output:
+        sortedindexedbamfile="/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/{sample}.sorted.bam.bai"
+    shell:
+        """
+        /vol/biotools/bin/samtools index {input.sortedbamfile} {output.sortedindexedbamfile}
+        """
+
+
+rule list_bamfiles:
+    params:
+        dir="/vol/cluster-data/rchen/git/ms_female_ltet/output/processed/"
+    output:
+        bamfiles="/vol/cluster-data/rchen/git/ms_female_ltet/output/list_bamfiles_females.txt"
+    shell:
+        """
+        ls -1 {params.dir}/*sorted.bam > {output.bamfiles}
+        """
